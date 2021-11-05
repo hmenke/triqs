@@ -72,8 +72,8 @@ namespace triqs {
         ChangeCol,
         ChangeRow,
         ChangeRowCol,
-        Insert2 = 10,
-        Remove2 = 11,
+        InsertK = 10,
+        RemoveK = 11,
         Refill  = 20
       } last_try = NoTry; // keep in memory the last operation not completed
       std::vector<size_t> row_num, col_num;
@@ -489,7 +489,7 @@ namespace triqs {
         TRIQS_ASSERT(j <= N);
         TRIQS_ASSERT(i >= 0);
         TRIQS_ASSERT(j >= 0);
-        if (N == Nmax) reserve(2 * Nmax, /* TODO */ 2);
+        if (N == Nmax) reserve(2 * Nmax, 0);
         last_try = Insert;
         w1.i     = i;
         w1.j     = j;
@@ -616,7 +616,7 @@ namespace triqs {
      * @category Operations
      */
 
-      value_type try_insert2(std::vector<std::tuple<size_t, x_type>> ix, std::vector<std::tuple<size_t, y_type>> jy) {
+      value_type try_insert_k(std::vector<std::tuple<size_t, x_type>> ix, std::vector<std::tuple<size_t, y_type>> jy) {
         TRIQS_ASSERT(last_try == NoTry);
         TRIQS_ASSERT(ix.size() == jy.size());
 
@@ -647,7 +647,7 @@ namespace triqs {
 
         // store it for complete_operation
         if (N >= Nmax - 1 || w2.k != Nk) reserve(2 * Nmax, Nk);
-        last_try = Insert2;
+        last_try = InsertK;
         for (size_t k = 0; k < w2.k; ++k) {
           std::tie(w2.i[k], w2.x[k]) = ix[k];
           std::tie(w2.j[k], w2.y[k]) = jy[k];
@@ -689,10 +689,13 @@ namespace triqs {
         newsign  = (idx_sum % 2 == 0 ? sign : -sign); // since N-i0 + N-j0 + N + 1 -i1 + N+1 -j1 = i0+j0 [2]
         return ksi * (newsign * sign);                // sign is unity, hence 1/sign == sign
       }
+      value_type try_insert2(size_t i0, size_t i1, size_t j0, size_t j1, x_type const &x0, x_type const &x1, y_type const &y0, y_type const &y1) {
+        return try_insert_k({{i0, x0}, {i1, x1}}, {{j0, y0}, {j1, y1}});
+      }
 
       //------------------------------------------------------------------------------------------
       private:
-      void complete_insert2() {
+      void complete_insert_k() {
         // store the new value of x,y. They are seen through the same permutations as rows and cols resp.
         for (int k = 0; k < w2.k; ++k) {
           x_values.push_back(w2.x[k]);
@@ -736,6 +739,9 @@ namespace triqs {
         mat_inv(range(N - w2.k, N), R) = 0;
         //mat_inv(R,R) += w2.MB(R,R2) * (w2.ksi * w2.MC(R2,R)); // OPTIMIZE BELOW
         blas::gemm(1.0, w2.MB(R, R2), (w2.ksi * w2.MC(R2, R)), 1.0, mat_inv(R, R));
+      }
+      void complete_insert2() {
+        complete_insert_k();
       }
 
       public:
@@ -823,7 +829,7 @@ namespace triqs {
      * Returns the ratio of det Minv_new / det Minv.
      * This routine does NOT make any modification. It has to be completed with complete_operation().
      */
-      value_type try_remove2(std::vector<size_t> i, std::vector<size_t> j) {
+      value_type try_remove_k(std::vector<size_t> i, std::vector<size_t> j) {
 
         // first make sure i0<i1 and j0<j1
         std::sort(i.begin(), i.end());
@@ -842,7 +848,7 @@ namespace triqs {
           TRIQS_ASSERT(std::adjacent_find(j.begin(), j.end(), predicate) == j.end());
         }
 
-        last_try = Remove2;
+        last_try = RemoveK;
 
         size_t const Nk = i.size();
         if (w2.k != Nk) reserve(N, Nk);
@@ -869,9 +875,12 @@ namespace triqs {
 
         return ksi * (newsign * sign); // sign is unity, hence 1/sign == sign
       }
+      value_type try_remove2(size_t i0, size_t i1, size_t j0, size_t j1) {
+        return try_remove_k({i0, i1}, {j0, j1});
+      }
       //------------------------------------------------------------------------------------------
       private:
-      void complete_remove2() {
+      void complete_remove_k() {
         if (N == w2.k) {
           clear();
           return;
@@ -933,6 +942,10 @@ namespace triqs {
           y_values.pop_back();
         }
       }
+      void complete_remove2() {
+        complete_remove_k();
+      }
+
       //------------------------------------------------------------------------------------------
       public:
       /**
@@ -1249,8 +1262,8 @@ namespace triqs {
           case (ChangeCol): complete_change_col(); break;
           case (ChangeRow): complete_change_row(); break;
           case (ChangeRowCol): complete_change_col_row(); break;
-          case (Insert2): complete_insert2(); break;
-          case (Remove2): complete_remove2(); break;
+          case (InsertK): complete_insert_k(); break;
+          case (RemoveK): complete_remove_k(); break;
           case (Refill): complete_refill(); break;
           case (NoTry): return; break;
           default: TRIQS_RUNTIME_ERROR << "Misuing det_manip"; // Never used?
@@ -1284,7 +1297,7 @@ namespace triqs {
 
       /// Insert2 (try_insert2 + complete)
       value_type insert2(size_t i0, size_t i1, size_t j0, size_t j1, x_type const &x0, x_type const &x1, y_type const &y0, y_type const &y1) {
-        auto r = try_insert2({{i0, x0}, {i1, x1}}, {{j0, y0}, {j1, y1}});
+        auto r = try_insert2(i0, i1, x0, x1, j0, j1, y0, y1);
         complete_operation();
         return r;
       }
@@ -1306,7 +1319,7 @@ namespace triqs {
 
       /// Remove2 (try_remove2 + complete)
       value_type remove2(size_t i0, size_t i1, size_t j0, size_t j1) {
-        auto r = try_remove2({i0, i1}, {j0, j1});
+        auto r = try_remove2(i0, i1, j0, j1);
         complete_operation();
         return r;
       }
